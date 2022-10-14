@@ -1,0 +1,10 @@
+sudo wget -O /etc/yum.repos.d/jenkins.repo     https://pkg.jenkins.io/redhat-stable/jenkins.repo
+sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+sudo yum upgrade
+sudo amazon-linux-extras install java-openjdk11
+sudo yum install jenkins -y
+sudo systemctl start jenkins.service
+sudo systemctl enable jenkins.service
+sudo amazon-linux-extras install python3.8 -y
+pip3.8 install ansible boto boto3 botocore
+sudo yum install git -y
