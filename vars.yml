@@ -1,0 +1,9 @@
+packages:
+  - git
+  - docker
+service:
+  - docker
+
+project_repo: https://github.com/abhiramthejas/flask-app.git
+clone_dir: /var/flask_app/
+image_name: "abhiramthejas/flask_app"
