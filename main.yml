@@ -1,0 +1,177 @@
+---
+- name: "AWS inventory create"
+  hosts: localhost
+  tasks:
+
+    - name: "Collect build ec2 instance"
+      amazon.aws.ec2_instance_info:
+        region: ap-south-1
+        filters: 
+          "tag:Name": build_server
+          instance-state-name: [ "running"]
+      register: ec2_build
+
+
+    - name: "Collect build ec2 instance"
+      amazon.aws.ec2_instance_info:
+        region: ap-south-1
+        filters: 
+          "tag:Name": test_server
+          instance-state-name: [ "running"]
+      register: ec2_test
+
+    - name: "build inventory"
+      debug:
+       msg: "instance ID : {{item.public_ip_address}}"
+      with_items: "{{ec2_build.instances}}" 
+
+    - name: "test inventory"
+      debug:
+       msg: "instance ID : {{item.public_ip_address}}"
+      with_items: "{{ec2_test.instances}}" 
+
+    - name: "Add build hosts to inventory"
+      add_host:
+        name: "{{item.public_ip_address}}"
+        ansible_ssh_host: "{{item.public_ip_address}}"
+        ansible_user: "ec2-user"
+        ansible_ssh_port: 22
+        ansible_ssh_private_key_file: "/var/deployment/local_key"
+        groups: 
+          - build_instances
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+      with_items: "{{ec2_build.instances}}"
+
+    - name: "Add test hosts to inventory"
+      add_host:
+        name: "{{item.public_ip_address}}"
+        ansible_ssh_host: "{{item.public_ip_address}}"
+        ansible_user: "ec2-user"
+        ansible_ssh_port: 22
+        ansible_ssh_private_key_file: "/var/deployment/local_key"
+        groups: 
+          - test_instances
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+      with_items: "{{ec2_test.instances}}"
+
+- name: "Building docker image from git on build server"
+  hosts: build_instances
+  become: true
+  vars_files: 
+    - vars.yml
+    - credential.yml
+  tasks:
+  
+
+    - name: "Package install"
+      yum:
+         name: "{{ packages }}"
+         state: present
+          
+
+    - name: "User add to docker group"
+      user:
+        name: "ec2-user"
+        groups: "docker"
+        append: true
+
+    - name: "pip module for docker"
+      pip:
+        name: docker-py
+
+    - name: "Service start"
+      service:
+         name: "{{ item }}"
+         state: started
+         enabled: true
+      with_items: "{{ service }}"
+
+    - name: "Git clone"
+      git:
+        repo: "{{ project_repo }}"
+        dest: "{{clone_dir}}"
+      register: clone_status
+
+    - name: "Docker hub login"
+      when: clone_status.changed == true
+      docker_login:
+        username: "{{ username }}"
+        password: "{{ password }}"
+        state: present
+
+    - name: "Docker image create"
+      when: clone_status.changed == true
+      docker_image:
+        name: "{{ image_name }}"
+        tag: "{{ item }}"
+        force_tag: true
+        force_source: true
+        source: build
+        push: true
+        build: 
+          path: "{{ clone_dir }}"
+          pull: true
+      with_items:
+        - "{{ clone_status.after }}"
+        - latest
+
+
+    - name: "Docker hub logout"
+      when: clone_status.changed == true
+      docker_login:
+        username: "{{ username }}"
+        password: "{{ password }}"
+        state: absent
+
+
+- name: "Running image on test server"
+  hosts: test_instances
+  become: true
+  vars_files: 
+    - vars.yml
+    - credential.yml
+  tasks:
+
+    - name: "Package install"
+      yum:
+         name: "{{ packages }}"
+         state: present
+          
+
+    - name: "User add to docker group"
+      user:
+        name: "ec2-user"
+        groups: "docker"
+        append: true
+
+    - name: "pip module for docker"
+      pip:
+        name: docker-py
+
+    - name: "Service start"
+      service:
+         name: "{{ item }}"
+         state: started
+         enabled: true
+      with_items: "{{ service }}"
+
+
+    - name: "Docker image pull"
+      docker_image:
+         name: "{{ image_name }}"
+         source: pull
+         force_source: true
+      register: image_status
+
+    - name: "Docker container run"
+      docker_container:
+          name: flaskapp
+          image: "{{ image_name }}:latest"
+          recreate: true
+          pull: true
+          ports:
+            - "80:80"
+      
+    
+
+
